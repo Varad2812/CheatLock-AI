@@ -43,5 +43,12 @@ body {
   height: 100vh;
   z-index: 9999;
   background: white;
-  overflow: hidden;
+  overflow: auto;
+}
+
+/* Ensure video elements are visible */
+video {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
 }

@@ -22,6 +22,7 @@ export default function TakeExam() {
   const [examStarted, setExamStarted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -33,20 +34,53 @@ export default function TakeExam() {
   }, [examId]);
 
   useEffect(() => {
-    // Initialize camera preview
-    if (videoRef.current && !examStarted) {
-      navigator.mediaDevices
-        .getUserMedia({ video: true, audio: false })
-        .then((stream) => {
+    // Initialize camera preview - keep it running throughout
+    const initCamera = async () => {
+      if (videoRef.current && !videoRef.current.srcObject) {
+        try {
+          console.log('🎥 Requesting camera access...');
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              width: { ideal: 640 },
+              height: { ideal: 480 }
+            }, 
+            audio: false 
+          });
+          
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+            console.log('✅ Camera stream connected successfully');
+            console.log('📹 Video tracks:', stream.getVideoTracks().length);
+            
+            // Ensure video plays and update state
+            videoRef.current.onloadedmetadata = () => {
+              console.log('📺 Video metadata loaded');
+              videoRef.current?.play()
+                .then(() => {
+                  console.log('▶️ Video playing');
+                  setCameraActive(true);
+                })
+                .catch(e => console.error('❌ Play error:', e));
+            };
+            
+            // Also try to play immediately
+            videoRef.current.play()
+              .then(() => {
+                console.log('▶️ Video playing (immediate)');
+                setCameraActive(true);
+              })
+              .catch(e => console.log('⏸️ Waiting for metadata...'));
           }
-        })
-        .catch((err) => {
-          console.error('Camera access denied:', err);
-        });
-    }
-  }, [examStarted]);
+        } catch (err) {
+          console.error('❌ Camera access denied:', err);
+          toast.error('Camera access required for proctoring');
+          setCameraActive(false);
+        }
+      }
+    };
+
+    initCamera();
+  }, []);
 
   async function loadExam() {
     try {
@@ -313,33 +347,36 @@ export default function TakeExam() {
     console.log('=== VIOLATION HANDLER CALLED ===');
     console.log('Violation:', violation);
     
-    setViolations((prev) => {
-      const newViolations = [...prev, violation];
-      const violationCount = newViolations.length;
-      const threshold = proctoringEngineRef.current?.getViolationThreshold() || 3;
-      
-      console.log('=== VIOLATION STATE UPDATE ===');
-      console.log(`Previous violations: ${prev.length}`);
-      console.log(`New violations: ${violationCount}`);
-      console.log(`Threshold: ${threshold}`);
-      
-      // Show toast with current count
-      toast.error(`Violation ${violationCount}/${threshold}: ${violation.description}`);
-      
-      // Check if threshold reached
-      if (violationCount >= threshold) {
-        console.log('=== THRESHOLD REACHED - TRIGGERING AUTO-END ===');
-        console.log(`Violation count: ${violationCount}, Threshold: ${threshold}`);
+    // Use setTimeout to avoid setState during render
+    setTimeout(() => {
+      setViolations((prev) => {
+        const newViolations = [...prev, violation];
+        const violationCount = newViolations.length;
+        const threshold = proctoringEngineRef.current?.getViolationThreshold() || 3;
         
-        // Use setTimeout to ensure state update completes first
-        setTimeout(() => {
-          console.log('=== CALLING handleExamEnd ===');
-          handleExamEnd(`${threshold} violations detected`);
-        }, 100);
-      }
-      
-      return newViolations;
-    });
+        console.log('=== VIOLATION STATE UPDATE ===');
+        console.log(`Previous violations: ${prev.length}`);
+        console.log(`New violations: ${violationCount}`);
+        console.log(`Threshold: ${threshold}`);
+        
+        // Show toast with current count
+        toast.error(`Violation ${violationCount}/${threshold}: ${violation.description}`);
+        
+        // Check if threshold reached
+        if (violationCount >= threshold) {
+          console.log('=== THRESHOLD REACHED - TRIGGERING AUTO-END ===');
+          console.log(`Violation count: ${violationCount}, Threshold: ${threshold}`);
+          
+          // Use another setTimeout to ensure state update completes first
+          setTimeout(() => {
+            console.log('=== CALLING handleExamEnd ===');
+            handleExamEnd(`${threshold} violations detected`);
+          }, 100);
+        }
+        
+        return newViolations;
+      });
+    }, 0);
   }, [handleExamEnd]);
 
   // Timer effect - must be after handleSubmit is defined
@@ -448,17 +485,28 @@ export default function TakeExam() {
 
           <div className="mb-6">
             <p className="text-sm font-semibold mb-2">Camera Preview:</p>
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              playsInline
-              className="w-full rounded-xl border-2 border-gray-200 bg-gray-100"
-              onError={(e) => console.error('Video error:', e)}
-            />
+            <div className="relative w-full aspect-video bg-gray-900 rounded-xl border-2 border-gray-200 overflow-hidden">
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+                onError={(e) => console.error('Video error:', e)}
+                onLoadedMetadata={(e) => console.log('Video metadata loaded', e.currentTarget.videoWidth, 'x', e.currentTarget.videoHeight)}
+              />
+              {!videoRef.current?.srcObject && (
+                <div className="absolute inset-0 flex items-center justify-center text-white">
+                  <div className="text-center">
+                    <Camera className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">Waiting for camera...</p>
+                  </div>
+                </div>
+              )}
+            </div>
             <canvas ref={canvasRef} className="hidden" />
             <p className="text-xs text-gray-500 mt-2">
-              If camera doesn't show, you can still start the exam
+              Grant camera permission when prompted
             </p>
           </div>
 
@@ -480,7 +528,48 @@ export default function TakeExam() {
   };
 
   return (
-    <div className="exam-fullscreen exam-mode bg-white p-8">
+    <div className="exam-fullscreen exam-mode bg-white p-8" style={{ overflow: 'auto' }}>
+      {/* Camera Preview - Fixed Position */}
+      <div className="fixed bottom-4 right-4 z-[9999]" style={{ position: 'fixed' }}>
+        <div className="bg-white rounded-lg shadow-2xl border-2 border-blue-300 overflow-hidden">
+          <div className={`px-3 py-1 text-white text-xs font-semibold flex items-center gap-2 ${
+            cameraActive ? 'bg-gradient-to-r from-green-600 to-blue-600' : 'bg-gradient-to-r from-blue-600 to-purple-600'
+          }`}>
+            <Camera className="w-3 h-3" />
+            {cameraActive ? '🟢 Camera Active' : 'Camera Feed'}
+          </div>
+          <div className="relative w-48 h-36 bg-gray-900">
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              className="w-full h-full object-cover"
+              style={{ 
+                display: 'block',
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                backgroundColor: '#000'
+              }}
+              onPlay={() => {
+                console.log('🎬 Video onPlay event fired');
+                setCameraActive(true);
+              }}
+            />
+            {!cameraActive && (
+              <div className="absolute inset-0 flex items-center justify-center text-white text-xs bg-gray-900">
+                <div className="text-center">
+                  <Camera className="w-8 h-8 mx-auto mb-1 opacity-50" />
+                  <p>Initializing camera...</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      <canvas ref={canvasRef} className="hidden" />
+
       {/* Header */}
       <div className="flex justify-between items-center mb-6 pb-4 border-b">
         <h1 className="text-2xl font-bold">{exam?.title}</h1>
@@ -580,9 +669,7 @@ export default function TakeExam() {
         </div>
       </div>
 
-      {/* Hidden video for proctoring */}
-      <video ref={videoRef} autoPlay muted className="hidden" />
-      <canvas ref={canvasRef} className="hidden" />
+
     </div>
   );
 }

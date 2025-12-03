@@ -139,6 +139,11 @@ export class AudioViolationDetector {
   } {
     const now = Date.now();
 
+    // If sensitivity is 0, disable audio detection completely
+    if (this.HIGH_NOISE_THRESHOLD === 0) {
+      return { isViolation: false };
+    }
+
     // Add to history
     this.audioHistory.push({
       noiseLevel: audioData.noiseLevel,
@@ -148,11 +153,6 @@ export class AudioViolationDetector {
 
     // Keep only recent history (last 10 seconds)
     this.audioHistory = this.audioHistory.filter((entry) => now - entry.timestamp < 10000);
-
-    // If sensitivity is 0, disable audio detection
-    if (this.HIGH_NOISE_THRESHOLD === 0) {
-      return { isViolation: false };
-    }
 
     // Single cough or background noise - allowed
     if (audioData.noiseLevel > this.HIGH_NOISE_THRESHOLD && !audioData.speechDetected) {

@@ -40,8 +40,14 @@ export class GazeDetector {
     // Initialize camera
     this.camera = new Camera(videoElement, {
       onFrame: async () => {
-        if (this.faceMesh && this.videoElement) {
-          await this.faceMesh.send({ image: this.videoElement });
+        // Guard: Only send frames if not stopped
+        if (this.faceMesh && this.videoElement && this.camera) {
+          try {
+            await this.faceMesh.send({ image: this.videoElement });
+          } catch (error) {
+            // Silently ignore errors after cleanup
+            console.debug('Frame processing error (likely after cleanup):', error);
+          }
         }
       },
       width: 640,
@@ -52,6 +58,11 @@ export class GazeDetector {
   }
 
   private onResults(results: Results) {
+    // Guard: Don't process if already stopped
+    if (!this.faceMesh || !this.onGazeUpdate) {
+      return;
+    }
+    
     const faceCount = results.multiFaceLandmarks?.length || 0;
     
     if (faceCount === 0) {
@@ -138,11 +149,24 @@ export class GazeDetector {
   }
 
   stop() {
-    if (this.camera) {
-      this.camera.stop();
-    }
-    if (this.faceMesh) {
-      this.faceMesh.close();
+    try {
+      // Stop camera first
+      if (this.camera) {
+        this.camera.stop();
+        this.camera = null;
+      }
+      
+      // Then close face mesh
+      if (this.faceMesh) {
+        this.faceMesh.close();
+        this.faceMesh = null;
+      }
+      
+      // Clear references
+      this.videoElement = null;
+      this.onGazeUpdate = null;
+    } catch (error) {
+      console.error('Error stopping gaze detector:', error);
     }
   }
 }
@@ -203,6 +227,11 @@ export class GazeViolationDetector {
 
     this.lastFaceDetectedTime = now;
 
+    // If sensitivity is 0, disable gaze detection completely (check again after face detection)
+    if (this.GAZE_SENSITIVITY === 0) {
+      return { isViolation: false };
+    }
+
     // Check for extreme head angles (beyond rough sheet usage)
     if (gazeData.extremeAngle) {
       const recentExtreme = this.gazeHistory.find(
@@ -230,6 +259,11 @@ export class GazeViolationDetector {
     // Keep only recent history (last 10 seconds)
     this.gazeHistory = this.gazeHistory.filter((entry) => now - entry.timestamp < 10000);
 
+    // If sensitivity is 0, disable gaze detection completely
+    if (this.GAZE_SENSITIVITY === 0) {
+      return { isViolation: false };
+    }
+
     // Check for downward gaze (allowed for rough sheet)
     if (gazeData.direction === 'down' && gazeData.headAngle < 50) {
       return { isViolation: false }; // Allowed
@@ -242,8 +276,8 @@ export class GazeViolationDetector {
     const suspiciousCount = recentGazes.filter((entry) => suspiciousDirections.includes(entry.direction)).length;
 
     // Use sensitivity setting (0 = disabled, 1 = very sensitive)
-    // Convert sensitivity to threshold: 0.20 = 3 detections, 0 = disabled
-    const threshold = this.GAZE_SENSITIVITY === 0 ? 999 : Math.max(1, Math.floor(5 - (this.GAZE_SENSITIVITY * 10)));
+    // Convert sensitivity to threshold: 0.20 = 3 detections
+    const threshold = Math.max(1, Math.floor(5 - (this.GAZE_SENSITIVITY * 10)));
     
     if (suspiciousCount > threshold && gazeData.direction !== 'center') {
       const direction = gazeData.direction;
