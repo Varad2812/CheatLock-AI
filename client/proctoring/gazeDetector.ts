@@ -29,7 +29,7 @@ export class GazeDetector {
     });
 
     this.faceMesh.setOptions({
-      maxNumFaces: 1,
+      maxNumFaces: 3, // Detect up to 3 faces to catch cheating
       refineLandmarks: true,
       minDetectionConfidence: 0.5,
       minTrackingConfidence: 0.5,

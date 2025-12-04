@@ -347,6 +347,23 @@ export default function TakeExam() {
     console.log('=== VIOLATION HANDLER CALLED ===');
     console.log('Violation:', violation);
     
+    // CRITICAL: Multiple faces detected - immediate exam end
+    if (violation.type === 'multiple_faces') {
+      console.log('🚨 CRITICAL: MULTIPLE FACES DETECTED - IMMEDIATE EXAM END');
+      toast.error('🚨 CRITICAL: Multiple people detected! Exam ending immediately.');
+      
+      // Add violation to state
+      setTimeout(() => {
+        setViolations((prev) => [...prev, violation]);
+      }, 0);
+      
+      // Immediately end exam without waiting for threshold
+      setTimeout(() => {
+        handleExamEnd('Multiple people detected - unauthorized assistance');
+      }, 500);
+      return;
+    }
+    
     // Use setTimeout to avoid setState during render
     setTimeout(() => {
       setViolations((prev) => {
